@@ -1,0 +1,28 @@
+<html lang="en">
+  <head>
+    <link rel="stylesheet" href="https://unpkg.com/chota@latest">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pprof</title>
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="tabs" style="display: flex; flex-wrap: wrap;">
+        {{ range .namespaces }}
+        <a{{ if eq . $.namespace }} class="active"{{ end }} href="{{ . }}">{{ . }}</a>
+        {{ end }}
+        <a{{ if eq "files" $.namespace }} class="active"{{ end }} href="files">files</a>
+      </div>
+    </nav>
+    <article>
+      <ul>
+        {{ range .hosts }}
+        <li><a href="proxy/{{ .Address }}/">{{ .Name }}</a></li>
+        {{ end }}
+        {{ range .files }}
+        <li><a href="proxy/{{ .Name }}/{{ .Type }}">{{ .Name }}/{{ .Type }}</a></li>
+        {{ end }}
+      </ul>
+    </article>
+  </body>
+</html>
