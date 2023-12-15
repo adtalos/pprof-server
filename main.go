@@ -150,6 +150,9 @@ func main() {
 		if err != nil {
 			return err
 		}
+		sort.Slice(files, func(i, j int) bool {
+			return must.Get(os.Stat(files[i])).ModTime().After(must.Get(os.Stat(files[j])).ModTime())
+		})
 		sources := make([]file, len(files))
 		for i, f := range files {
 			parts := strings.Split(f, "/")
