@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 type kubernetesRegistry struct {
 	core               v1.CoreV1Interface
 	namespaceInterface v1.NamespaceInterface
+	client             http.Client
 }
 
 func NewKubernetesRegistry(client *kubernetes.Clientset) Registry {
@@ -21,6 +24,9 @@ func NewKubernetesRegistry(client *kubernetes.Clientset) Registry {
 	return kubernetesRegistry{
 		core:               core,
 		namespaceInterface: core.Namespaces(),
+		client: http.Client{
+			Timeout: time.Millisecond * 100,
+		},
 	}
 }
 
@@ -51,12 +57,23 @@ func (v kubernetesRegistry) ListHosts(ctx context.Context, namespace string) ([]
 		}
 		for _, container := range item.Spec.Containers {
 			for _, port := range container.Ports {
-				if port.Name != "http" || port.Protocol != v1Types.ProtocolTCP {
+				if port.Protocol != v1Types.ProtocolTCP {
+					continue
+				}
+				portString := strconv.FormatInt(int64(port.ContainerPort), 10)
+				address := item.Status.PodIP + ":" + portString
+				r, err := v.client.Get(address + "/debug/pprof/")
+				if err != nil {
+					fmt.Printf("check address %s fail, %s\n", address, err)
+					continue
+				}
+				defer r.Body.Close()
+				if r.StatusCode >= 400 {
 					continue
 				}
 				hosts = append(hosts, Host{
-					Name:    item.Name,
-					Address: item.Status.PodIP + ":" + strconv.FormatInt(int64(port.ContainerPort), 10),
+					Name:    item.Name + ":" + portString,
+					Address: address,
 					Age:     now.Sub(item.Status.StartTime.Time),
 				})
 			}
