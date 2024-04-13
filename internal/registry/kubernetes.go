@@ -62,7 +62,7 @@ func (v kubernetesRegistry) ListHosts(ctx context.Context, namespace string) ([]
 				}
 				portString := strconv.FormatInt(int64(port.ContainerPort), 10)
 				address := item.Status.PodIP + ":" + portString
-				r, err := v.client.Get(address + "/debug/pprof/")
+				r, err := v.client.Get("http://" + address + "/debug/pprof/")
 				if err != nil {
 					fmt.Printf("check address %s fail, %s\n", address, err)
 					continue
