@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	v1Types "k8s.io/api/core/v1"
@@ -17,6 +18,7 @@ type kubernetesRegistry struct {
 	core               v1.CoreV1Interface
 	namespaceInterface v1.NamespaceInterface
 	client             http.Client
+	namePortStatus     *sync.Map
 }
 
 func NewKubernetesRegistry(client *kubernetes.Clientset) Registry {
@@ -27,6 +29,7 @@ func NewKubernetesRegistry(client *kubernetes.Clientset) Registry {
 		client: http.Client{
 			Timeout: time.Millisecond * 100,
 		},
+		namePortStatus: &sync.Map{},
 	}
 }
 
@@ -60,19 +63,23 @@ func (v kubernetesRegistry) ListHosts(ctx context.Context, namespace string) ([]
 				if port.Protocol != v1Types.ProtocolTCP {
 					continue
 				}
+
 				portString := strconv.FormatInt(int64(port.ContainerPort), 10)
+				name := item.Name + ":" + portString
 				address := item.Status.PodIP + ":" + portString
-				r, err := v.client.Get("http://" + address + "/debug/pprof/")
-				if err != nil {
-					fmt.Printf("check address %s fail, %s\n", address, err)
+				var isValid bool
+				if status, exist := v.namePortStatus.Load(name); exist {
+					isValid = status.(bool)
+				} else {
+					isValid = v.isValidAddress("http://" + address + "/debug/pprof/")
+					v.namePortStatus.Store(name, isValid)
+				}
+				if !isValid {
 					continue
 				}
-				defer r.Body.Close()
-				if r.StatusCode >= 400 {
-					continue
-				}
+
 				hosts = append(hosts, Host{
-					Name:    item.Name + ":" + portString,
+					Name:    name,
 					Address: address,
 					Age:     now.Sub(item.Status.StartTime.Time),
 				})
@@ -81,4 +88,14 @@ func (v kubernetesRegistry) ListHosts(ctx context.Context, namespace string) ([]
 
 	}
 	return hosts, nil
+}
+
+func (v kubernetesRegistry) isValidAddress(url string) bool {
+	r, err := v.client.Get(url)
+	if err != nil {
+		fmt.Printf("check address %s fail, %s\n", url, err)
+		return false
+	}
+	defer r.Body.Close()
+	return r.StatusCode < 300
 }
