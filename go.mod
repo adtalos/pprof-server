@@ -1,4 +1,4 @@
-module github.com/adtalos/devops/pprof
+module github.com/adtalos/pprof-server
 
 go 1.21.3
 

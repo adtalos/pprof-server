@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/adtalos/devops/pprof/internal/pprof"
-	"github.com/adtalos/devops/pprof/internal/registry"
 	"github.com/adtalos/lib-go/coalesce"
 	"github.com/adtalos/lib-go/must"
+	"github.com/adtalos/pprof-server/internal/pprof"
+	"github.com/adtalos/pprof-server/internal/registry"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/template/html/v2"
 	"github.com/robfig/cron/v3"
