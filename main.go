@@ -15,8 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/adtalos/lib-go/coalesce"
-	"github.com/adtalos/lib-go/must"
 	"github.com/adtalos/pprof-server/internal/pprof"
 	"github.com/adtalos/pprof-server/internal/registry"
 	"github.com/gofiber/fiber/v2"
@@ -39,11 +37,11 @@ func main() {
 
 	var config *rest.Config
 	if *isDebug {
-		config = must.Get(clientcmd.BuildConfigFromFlags("", filepath.Join(homedir.HomeDir(), ".kube", "config")))
+		config = mustGet(clientcmd.BuildConfigFromFlags("", filepath.Join(homedir.HomeDir(), ".kube", "config")))
 	} else {
-		config = must.Get(rest.InClusterConfig())
+		config = mustGet(rest.InClusterConfig())
 	}
-	kubernetesRegistry := registry.NewKubernetesRegistry(must.Get(kubernetes.NewForConfig(config)))
+	kubernetesRegistry := registry.NewKubernetesRegistry(mustGet(kubernetes.NewForConfig(config)))
 
 	httpClient := &http.Client{
 		Timeout: time.Minute,
@@ -96,7 +94,7 @@ func main() {
 			}
 
 			// cleanup
-			files := must.Get(filepath.Glob(filepath.Join(*dest, "*/*.pb.gz")))
+			files := mustGet(filepath.Glob(filepath.Join(*dest, "*/*.pb.gz")))
 			ago := time.Now().Add(-time.Hour * 24)
 			for _, file := range files {
 				if info, err := os.Stat(file); err != nil {
@@ -151,7 +149,7 @@ func main() {
 			return err
 		}
 		sort.Slice(files, func(i, j int) bool {
-			return must.Get(os.Stat(files[i])).ModTime().After(must.Get(os.Stat(files[j])).ModTime())
+			return mustGet(os.Stat(files[i])).ModTime().After(mustGet(os.Stat(files[j])).ModTime())
 		})
 		sources := make([]file, len(files))
 		for i, f := range files {
@@ -173,7 +171,10 @@ func main() {
 		if err != nil {
 			return err
 		}
-		namespace := coalesce.Value(c.Params("namespace"), namespaces[0])
+		namespace := c.Params("namespace")
+		if namespace == "" {
+			namespace = namespaces[0]
+		}
 		hosts, err := kubernetesRegistry.ListHosts(c.Context(), namespace)
 		if err != nil {
 			return err
@@ -239,5 +240,14 @@ func main() {
 		return c.SendStream(r.Body)
 	})
 
-	app.Listen(":" + strconv.FormatInt(*port, 10))
+	if err := app.Listen(":" + strconv.FormatInt(*port, 10)); err != nil {
+		panic(err)
+	}
+}
+
+func mustGet[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

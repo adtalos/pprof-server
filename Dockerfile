@@ -1,10 +1,8 @@
-FROM registry.mobrtb.com/library/golang:1.21.5-bullseye
+FROM golang:1.21.5-bullseye
 
 RUN apt-get update && apt-get install -y --no-install-recommends graphviz && \
   apt-get autoremove -y && apt-get autoclean && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN go install github.com/google/pprof@latest
-
-RUN go env -w GO111MODULE=on GOPROXY=http://goproxy.mobrtb.com,direct GONOSUMDB=*
 
 WORKDIR /src
 

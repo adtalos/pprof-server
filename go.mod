@@ -3,7 +3,6 @@ module github.com/adtalos/pprof-server
 go 1.21.3
 
 require (
-	github.com/adtalos/lib-go v1.154.2
 	github.com/gofiber/fiber/v2 v2.51.0
 	github.com/gofiber/template/html/v2 v2.0.5
 	github.com/robfig/cron/v3 v3.0.1
