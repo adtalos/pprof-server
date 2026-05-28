@@ -1,4 +1,4 @@
-FROM golang:1.25.3-bookworm
+FROM golang:1.26.3-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends graphviz && \
   apt-get autoremove -y && apt-get autoclean && apt-get clean && rm -rf /var/lib/apt/lists/*
