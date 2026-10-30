@@ -2,8 +2,7 @@ package registry
 
 import (
 	"context"
-	"fmt"
-	"net/http"
+	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -17,19 +16,15 @@ import (
 type kubernetesRegistry struct {
 	core               v1.CoreV1Interface
 	namespaceInterface v1.NamespaceInterface
-	client             http.Client
-	namePortStatus     *sync.Map
+	discovery          *portDiscovery
 }
 
-func NewKubernetesRegistry(client *kubernetes.Clientset) Registry {
+func NewKubernetesRegistry(client *kubernetes.Clientset, discoveryConcurrency int) Registry {
 	core := client.CoreV1()
 	return kubernetesRegistry{
 		core:               core,
 		namespaceInterface: core.Namespaces(),
-		client: http.Client{
-			Timeout: time.Millisecond * 100,
-		},
-		namePortStatus: &sync.Map{},
+		discovery:          newPortDiscovery(discoveryConcurrency),
 	}
 }
 
@@ -52,50 +47,94 @@ func (v kubernetesRegistry) ListHosts(ctx context.Context, namespace string) ([]
 		return nil, err
 	}
 
-	now := time.Now()
-	hosts := make([]Host, 0, len(r.Items))
+	type candidate struct {
+		key  probeKey
+		host Host
+	}
+	candidates := make([][]candidate, 0, len(r.Items))
+	active := make(map[probeKey]struct{})
 	for _, item := range r.Items {
-		if item.Status.Phase != v1Types.PodRunning {
+		if item.Status.Phase != v1Types.PodRunning || item.Status.PodIP == "" {
 			continue
 		}
-		for _, container := range item.Spec.Containers {
-			for _, port := range container.Ports {
-				if port.Protocol != v1Types.ProtocolTCP {
-					continue
-				}
-
-				portString := strconv.FormatInt(int64(port.ContainerPort), 10)
-				name := item.Name + ":" + portString
-				address := item.Status.PodIP + ":" + portString
-				var isValid bool
-				if status, exist := v.namePortStatus.Load(name); exist {
-					isValid = status.(bool)
-				} else {
-					isValid = v.isValidAddress("http://" + address + "/debug/pprof/")
-					v.namePortStatus.Store(name, isValid)
-				}
-				if !isValid {
-					continue
-				}
-
-				hosts = append(hosts, Host{
-					Name:    name,
-					Address: address,
-					Age:     now.Sub(item.Status.StartTime.Time),
-				})
-			}
+		age := time.Duration(0)
+		if item.Status.StartTime != nil {
+			age = time.Since(item.Status.StartTime.Time)
 		}
+		podCandidates := make([]candidate, 0)
+		for _, port := range candidatePorts(item.Spec.Containers) {
+			portString := strconv.FormatInt(int64(port), 10)
+			key := probeKey{namespace: item.Namespace, uid: string(item.UID), ip: item.Status.PodIP, port: port}
+			active[key] = struct{}{}
+			podCandidates = append(podCandidates, candidate{key: key, host: Host{
+				Name:    item.Name + ":" + portString,
+				Address: net.JoinHostPort(item.Status.PodIP, portString),
+				Age:     age,
+			}})
+		}
+		if len(podCandidates) > 0 {
+			candidates = append(candidates, podCandidates)
+		}
+	}
+	v.discovery.prune(namespace, active)
 
+	matches := make([]*Host, len(candidates))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	for range min(cap(v.discovery.slots), len(candidates)) {
+		workers.Go(func() {
+			for i := range jobs {
+				for _, candidate := range candidates[i] {
+					if ctx.Err() != nil {
+						break
+					}
+					if v.discovery.valid(ctx, candidate.key, candidate.host.Address) {
+						matches[i] = &candidate.host
+						break
+					}
+				}
+			}
+		})
+	}
+queue:
+	for i := range candidates {
+		select {
+		case jobs <- i:
+		case <-ctx.Done():
+			break queue
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	hosts := make([]Host, 0, len(candidates))
+	for _, match := range matches {
+		if match != nil {
+			hosts = append(hosts, *match)
+		}
 	}
 	return hosts, nil
 }
 
-func (v kubernetesRegistry) isValidAddress(url string) bool {
-	r, err := v.client.Get(url)
-	if err != nil {
-		fmt.Printf("check address %s fail, %s\n", url, err)
-		return false
+// Containers and ports retain declaration order.
+// Loopback-only listeners cannot be discovered from a PodIP.
+func candidatePorts(containers []v1Types.Container) []int32 {
+	seen := make(map[int32]struct{})
+	ports := make([]int32, 0)
+	for _, container := range containers {
+		for _, port := range container.Ports {
+			if (port.Protocol != "" && port.Protocol != v1Types.ProtocolTCP) || port.ContainerPort < 1 || port.ContainerPort > 65535 {
+				continue
+			}
+			if _, exists := seen[port.ContainerPort]; exists {
+				continue
+			}
+			seen[port.ContainerPort] = struct{}{}
+			ports = append(ports, port.ContainerPort)
+		}
 	}
-	defer r.Body.Close()
-	return r.StatusCode < 300
+	return ports
 }
