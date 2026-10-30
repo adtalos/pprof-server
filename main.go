@@ -33,7 +33,11 @@ func main() {
 	crontab := flag.String("cron", "", "")
 	rawCronPrefixes := flag.String("keywords", "", "cron prefixes, {namespace}:{prefix}, split by comma")
 	dest := flag.String("dest", "/pprof", "cron dest")
+	discoveryConcurrency := flag.Int("discovery-concurrency", 8, "maximum concurrent pprof discovery probes")
 	flag.Parse()
+	if *discoveryConcurrency < 1 {
+		panic("discovery-concurrency must be greater than zero")
+	}
 
 	var config *rest.Config
 	if *isDebug {
@@ -41,7 +45,7 @@ func main() {
 	} else {
 		config = mustGet(rest.InClusterConfig())
 	}
-	kubernetesRegistry := registry.NewKubernetesRegistry(mustGet(kubernetes.NewForConfig(config)))
+	kubernetesRegistry := registry.NewKubernetesRegistry(mustGet(kubernetes.NewForConfig(config)), *discoveryConcurrency)
 
 	httpClient := &http.Client{
 		Timeout: time.Minute,
